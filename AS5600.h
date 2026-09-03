@@ -2,6 +2,7 @@
 #define AS5600_H
 
 #include <Arduino.h>
+#include <Wire.h>
 // ================= AS5600 velocity encoder =================
 #define AS5600_ADDR      0x36
 #define REG_STATUS       0x0B
@@ -19,15 +20,25 @@ class AS5600 {
 public:
     void EncoderBegin(bool overide = false);
     void update();
+    float getCenterOffset() const;
+    float setCenterOffset(float offset);
+    float getAngle() const;
+    float getCumalativeAngle() const;
     float getAngularVelocity() const;
+    float getAngularAcceleration() const;
 
 private:
-    bool     _magnetPresent = false;
-    int      _magnetStatus = 0;    
-    uint16_t _lastRaw = 0;
-    uint32_t _lastTime = 0;
-    float    _velocity = 0.0f;
-
+    bool     _magnetPresent     = false;
+    int      _magnetStatus      = 0;
+    uint16_t _lastRaw           = 0;
+    uint32_t _lastTime          = 0;
+    float    _centerOffset      = 0.0f;
+    float    _cumulativeAngle   = 0.0f;
+    float    _angle             = 0.0f;
+    float    _velocity          = 0.0f;
+    float    _lastVelocity      = 0.0f;
+    float    _acceleration      = 0.0f;
+    
 
     bool _connect();
     bool _magnetCheck();
