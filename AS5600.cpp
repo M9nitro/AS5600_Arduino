@@ -44,7 +44,7 @@ void AS5600::EncoderBegin(bool overide) {
             delay(100);
             Serial.println("Encoder Missing");
         }
-    AS5600::setFilter(SF_8X, FTH_10, HYST_2);
+    AS5600::setFilter(SF_16X, FTH_OFF, HYST_3);   // 3 LSB hysteresis = 0.26 deg sensor deadband; anything less lets noise through as 0.4 rad/s spikes
     AS5600::_readAngle(AS5600::_lastRaw);
     AS5600::_lastTime = micros();
    
