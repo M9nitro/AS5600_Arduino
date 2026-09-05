@@ -16,6 +16,7 @@
 #define STATUS_ML_BIT    4
 #define STATUS_MH_BIT    3
 #define MAX_DELTA_COUNTS 400
+#define MIN_DT_S         0.010f  // velocity window. 1 count / 10 ms = 3 deg/s steering resolution; raise for less noise, lower for faster response
 #define GEAR_RATIO       3.00f
 #define DIRECTION        -1.0f   // flip to +1.0f if positive steering reads negative
 
@@ -43,6 +44,7 @@ public:
     float getAngularAcceleration() const;
     bool setFilter(SlowFilter sf, FastFilter fth, Hysteresis hyst);
     bool magnetOk();
+    uint8_t magnetStatus();                 // raw STATUS reg: bit5 MD detected, bit4 ML too weak, bit3 MH too strong. 0 = no reply
 
 
 private:

@@ -6,6 +6,11 @@ bool AS5600::magnetOk() {
     return (s & (1 << STATUS_MD_BIT)) && !(s & ((1 << STATUS_ML_BIT) | (1 << STATUS_MH_BIT)));
 }
 
+uint8_t AS5600::magnetStatus() {
+    uint8_t s;
+    return _readReg(REG_STATUS, s) ? s : 0;
+}
+
 void AS5600::setCenter()            { AS5600::_center = AS5600::_angle;}
 void AS5600::setCenter(float rad)   { AS5600::_center = rad;}
 
@@ -40,7 +45,7 @@ void AS5600::EncoderBegin(bool overide) {
             Serial.println("Encoder Missing");
         }
     AS5600::setFilter(SF_8X, FTH_10, HYST_2);
-    AS5600::_readRawAngle(AS5600::_lastRaw);
+    AS5600::_readAngle(AS5600::_lastRaw);
     AS5600::_lastTime = micros();
    
 
@@ -135,13 +140,13 @@ bool AS5600::_readRawAngle(uint16_t &out) {
 
 void AS5600::update() {
     uint16_t raw;
-    if (!AS5600::_readRawAngle(raw)) return;               // keep old values on I2C failure
+    if (!AS5600::_readAngle(raw)) return;                  // ANGLE reg, not RAW: hysteresis only filters ANGLE, kills the 1 LSB dither
 
     AS5600::_angle = ((float)raw/RAW_MAX)*TWO_PI_F;         // absolute angle, radians
 
     uint32_t now = micros();
     float dt = (now - AS5600::_lastTime) * 1e-6f;
-    if (dt < 0.0005f) return;                               // too soon, dividing by tiny dt amplifies noise
+    if (dt < MIN_DT_S) return;                              // angle already refreshed above; derivatives wait for a full window
 
     float delta = (float)raw - (float)AS5600::_lastRaw;
     if (delta > 2048) delta -= 4096;                        // unwrap 4095 -> 0 rollover
