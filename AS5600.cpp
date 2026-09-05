@@ -1,5 +1,14 @@
 #include "./AS5600.h"
 
+bool AS5600::magnetOk() {
+    uint8_t s;
+    if (!_readReg(REG_STATUS, s)) return false;          // no ACK = no sensor
+    return (s & (1 << STATUS_MD_BIT)) && !(s & ((1 << STATUS_ML_BIT) | (1 << STATUS_MH_BIT)));
+}
+
+void AS5600::setCenter()            { AS5600::_center = AS5600::_angle;}
+void AS5600::setCenter(float rad)   { AS5600::_center = rad;}
+
 bool AS5600::_connect() {
     Wire.begin();
     Wire.setClock(100000);
@@ -7,98 +16,166 @@ bool AS5600::_connect() {
 }
 
 bool AS5600::_magnetCheck() {
-    Wire.beginTransmission((uint8_t)AS5600_ADDR);
-    Wire.write(REG_STATUS);
-    Wire.endTransmission();
-    Wire.requestFrom((uint8_t)AS5600_ADDR, 1);
-    while (Wire.available() == 0){
-        delay(1);
-    
-    AS5600::_magnetStatus = Wire.read();
-    bool magnetDetected = (AS5600::_magnetStatus & (1 << STATUS_MD_BIT)) != 0;
-    bool magnetTooLow = (AS5600::_magnetStatus & (1 << STATUS_ML_BIT)) != 0;
-    bool magnetTooHigh = (AS5600::_magnetStatus & (1 << STATUS_MH_BIT)) != 0;
-
-    if (magnetDetected && !magnetTooLow && !magnetTooHigh) {
-        AS5600::_magnetPresent = true;
-        return true;
-    } else {
-        AS5600::_magnetPresent = false;
+    uint8_t s;
+    if (!_readReg(REG_STATUS, s)) { Serial.println("Encoder not responding"); return false; }
+    AS5600::_magnetStatus = s;
+    bool magnetDetected = s & (1 << STATUS_MD_BIT);
+    bool magnetTooLow   = s & (1 << STATUS_ML_BIT);
+    bool magnetTooHigh  = s & (1 << STATUS_MH_BIT);
+    AS5600::_magnetPresent = magnetDetected && !magnetTooLow && !magnetTooHigh;
+    if (!AS5600::_magnetPresent) {
         Serial.print("Magnet Status: ");
         if (!magnetDetected) Serial.print("Not Detected ");
-        if (magnetTooLow) Serial.print("Magnet Too Low ");
-        if (magnetTooHigh) Serial.print("Magnet Too High ");
-        return false;
-
+        if (magnetTooLow)    Serial.print("Magnet Too Low ");
+        if (magnetTooHigh)   Serial.print("Magnet Too High ");
+        Serial.println();
     }
-    }
-    
+    return AS5600::_magnetPresent;
 }
 
-void AS5600::EncoderBegin(bool overide = false) {
+void AS5600::EncoderBegin(bool overide) {
     AS5600::_connect();
-   while (!AS5600::_magnetCheck() | !overide) {
-    delay(100);
-    if (!overide) {
-        Serial.println("Starting without Encoder");
-        AS5600::_magnetPresent = false;
-    }
-   }
+   while (!AS5600::_magnetCheck() && !overide) {
+            delay(100);
+            Serial.println("Encoder Missing");
+        }
+    AS5600::setFilter(SF_8X, FTH_10, HYST_2);
+    AS5600::_readRawAngle(AS5600::_lastRaw);
+    AS5600::_lastTime = micros();
+   
 
 
 }
 
-bool AS5600::readRaw(uint16_t &out) {
+bool AS5600::_readReg(uint8_t reg, uint8_t &val) {
+    Wire.beginTransmission((uint8_t)AS5600_ADDR);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0) return false;
+    if (Wire.requestFrom((uint8_t)AS5600_ADDR, (uint8_t)1) != 1) return false;
+    val = Wire.read();
+    return true;
+}
+
+bool AS5600::_writeReg(uint8_t reg, uint8_t val) {
+    Wire.beginTransmission((uint8_t)AS5600_ADDR);
+    Wire.write(reg);
+    Wire.write(val);
+    return Wire.endTransmission() == 0;
+}
+
+// Volatile: survives until power-off. Never burns.
+bool AS5600::setFilter(SlowFilter sf, FastFilter fth, Hysteresis hyst) {
+    uint8_t hi, lo;
+    if (!_readReg(REG_CONF_H, hi) || !_readReg(REG_HYST, lo)) return false;
+    hi = (hi & ~0x1F) | ((fth & 0x07) << 2) | (sf & 0x03);   // keep WD (bit 5)
+    lo = (lo & ~0x0C) | ((hyst & 0x03) << 2);                // keep PM/OUTS/PWMF
+    return _writeReg(REG_CONF_H, hi) && _writeReg(REG_HYST, lo);
+}
+
+/*
+Read the Processed Angle. 
+*/
+
+
+bool AS5600::_readAngle(uint16_t &out) {
 
     //Check if the magnet is correctly Placed
-    Wire.beginTransmission((uint8_t)AS5600_ADDR);
-    Wire.write(REG_STATUS);
-    if (Wire.endTransmission(false) != 0) return false;
-    if (Wire.requestFrom((uint8_t)AS5600_ADDR, 1) != 1) return false;
-    uint8_t status = Wire.read();
-        if (!(status & (1 << STATUS_MD_BIT))) return false;
-        if (status & (1 << STATUS_ML_BIT)) return false;
-        if (status & (1 << STATUS_MH_BIT)) return false;
+    // Wire.beginTransmission((uint8_t)AS5600_ADDR);
+    // Wire.write(REG_STATUS);
+    // if (Wire.endTransmission(false) != 0) return false;
+    // if (Wire.requestFrom((uint8_t)AS5600_ADDR, 1) != 1) return false;
+    // uint8_t status = Wire.read();
+    //     if (!(status & (1 << STATUS_MD_BIT))) return false;
+    //     if (status & (1 << STATUS_ML_BIT)) return false;
+    //     if (status & (1 << STATUS_MH_BIT)) return false;
 
     Wire.beginTransmission((uint8_t)AS5600_ADDR);
     Wire.write(REG_ANGLE_H);
     if (Wire.endTransmission(false) != 0 ) return false;
-    if (Wire.requestFrom((uint8_t)AS5600_ADDR, 2) != 1) return false;
+    if (Wire.requestFrom((uint8_t)AS5600_ADDR, (uint8_t)2) != 2) return false;
 
     uint16_t hi = Wire.read();
     uint16_t lo = Wire.read();
 
-    out = (hi << 8) | lo & 0x0FFF;
+    out = ((hi << 8) | lo )& 0x0FFF;
+
+    return true;
+
+}
+
+/*
+Raw Angle for velocity/Accerlaration
+*/
+
+bool AS5600::_readRawAngle(uint16_t &out) {
+
+    //Check if the magnet is correctly Placed
+    // Wire.beginTransmission((uint8_t)AS5600_ADDR);
+    // Wire.write(REG_STATUS);
+    // if (Wire.endTransmission(false) != 0) return false;
+    // if (Wire.requestFrom((uint8_t)AS5600_ADDR, 1) != 1) return false;
+    // uint8_t status = Wire.read();
+    //     if (!(status & (1 << STATUS_MD_BIT))) return false;
+    //     if (status & (1 << STATUS_ML_BIT)) return false;
+    //     if (status & (1 << STATUS_MH_BIT)) return false;
+
+    Wire.beginTransmission((uint8_t)AS5600_ADDR);
+    Wire.write(REG_RAW_ANGLE_H);
+    if (Wire.endTransmission(false) != 0 ) return false;
+    if (Wire.requestFrom((uint8_t)AS5600_ADDR, (uint8_t)2) != 2) return false;
+
+    uint16_t hi = Wire.read();
+    uint16_t lo = Wire.read();
+
+    out = ((hi << 8) | lo )& 0x0FFF;
 
     return true;
 
 }
 
 void AS5600::update() {
-    uint16_t raw; // Raw angle value from the encoder
-    if (!readRaw(raw)) return; // Read the Raw Angle from the AS5600 sensor
-    AS5600::_angle = ((float)raw/RAW_MAX)*TWO_PI_F; // Absolute Angle in Radians
-    uint16_t now = micros(); // Current time in microseconds
-    float dt = (now - AS5600::_lastTime) * 1e-6f; // Time difference in seconds
-    if (dt < 0.0005f) return; // Ignore updates that are too close together (less than 0.5 ms)
-    int32_t delta = (int32_t)raw - (int32_t)AS5600::_lastRaw; // Change in raw angle counts
-    if (delta > 2048) delta -= 4096;
+    uint16_t raw;
+    if (!AS5600::_readRawAngle(raw)) return;               // keep old values on I2C failure
+
+    AS5600::_angle = ((float)raw/RAW_MAX)*TWO_PI_F;         // absolute angle, radians
+
+    uint32_t now = micros();
+    float dt = (now - AS5600::_lastTime) * 1e-6f;
+    if (dt < 0.0005f) return;                               // too soon, dividing by tiny dt amplifies noise
+
+    float delta = (float)raw - (float)AS5600::_lastRaw;
+    if (delta > 2048) delta -= 4096;                        // unwrap 4095 -> 0 rollover
     if (delta < -2048) delta += 4096;
-    if (abs(delta) > MAX_DELTA_COUNTS) return; // Ignore updates that are too large (greater than 400 counts)
-    if (abs(delta) < MIN_DELTA_COUNT) return; // Ignore updates that are too small (less than 0.1024 counts)
-    AS5600::_velocity = ((delta/RAW_MAX)*TWO_PI_F)/dt; // Angular velocity in radians per second
-    AS5600::_cumulativeAngle += (delta/RAW_MAX)*TWO_PI_F; // Cumulative angle in radians
-    AS5600::_accerleration = (AS5600::_velocity - AS5600::_lastVelocity)/dt; // Angular acceleration in radians per second squared
-    // Update the last time, last raw angle, and last velocity for the next update
-    AS5600::_lastTime = now;
-    AS5600::_lastRaw = raw;
-    AS5600::_lastVelocity = AS5600::_velocity;
+
+    // ponytail: steering can't move 400 counts (35 deg) in one loop, so treat it as a glitch:
+    // skip the derivative math but still resync so the next sample is compared against real data.
+    if (abs(delta) <= MAX_DELTA_COUNTS) {
+        float dAngle = (delta/RAW_MAX)*TWO_PI_F;
+        AS5600::_velocity = dAngle/dt;                       // 0 when stationary
+        AS5600::_cumulativeAngle += dAngle;
+        AS5600::_acceleration = (AS5600::_velocity - AS5600::_lastVelocity)/dt;
+        AS5600::_lastVelocity = AS5600::_velocity;
+    } else {
+        AS5600::_velocity = AS5600::_lastVelocity = AS5600::_acceleration = 0.0f; // stall/glitch reads as stopped, not stale
     }
 
-float AS5600::getCenterOffset() const { 
-    AS5600::_centerOffset = AS5600::_angle;
-    return AS5600::_centerOffset; }
-float AS5600::getAngularAngle() const { return AS5600::_angle; }
-float  AS5600::getAngularVelocity() const { return AS5600::_velocity; }
-float  AS5600::getAngularAcceleration() const { return AS5600::_accerleration; }
+    AS5600::_lastTime = now;                                // always advance, even on a rejected sample
+    AS5600::_lastRaw = raw;
+}
 
+float AS5600::getAngle() const { return AS5600::_angle; }
+float AS5600::getAngularVelocity() const { return AS5600::_velocity; }   // sensor shaft, rad/s
+float AS5600::getCumalativeAngle() const {return AS5600::_cumulativeAngle;}
+float  AS5600::getAngularAcceleration() const { return AS5600::_acceleration; }
+
+// ---- steering: all relative to _center, scaled to the steering shaft ----
+float AS5600::getCenter() const { return AS5600::_center; }
+
+float AS5600::getSteeringAngle() const {
+    float d = AS5600::_angle - AS5600::_center;
+    if (d >  3.14159265f) d -= TWO_PI_F;   // wrap to +/-180 deg sensor = +/-60 deg steering,
+    if (d < -3.14159265f) d += TWO_PI_F;   // so the 4095->0 seam always sits opposite center
+    return DIRECTION * d / GEAR_RATIO;
+}
+
+float AS5600::getSteeringVelocity() const { return DIRECTION * AS5600::_velocity / GEAR_RATIO; }
