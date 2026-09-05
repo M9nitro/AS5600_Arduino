@@ -93,7 +93,7 @@ Read the Processed Angle. With Hysteresis
 */
 bool AS5600::_readAngle(uint16_t &out) {
 
-    if (!AS5600::magnetOk) return false;
+    if (!AS5600::magnetOk()) return false;
 
     Wire.beginTransmission((uint8_t)AS5600_ADDR);
     Wire.write(REG_ANGLE_H);
@@ -113,7 +113,7 @@ Raw Angle for angle/velocity/Accerlaration without hysteresis.
 */
 bool AS5600::_readRawAngle(uint16_t &out) {
 
-    if (!AS5600::magnetOk) return false; 
+    if (!AS5600::magnetOk()) return false; 
 
     Wire.beginTransmission((uint8_t)AS5600_ADDR);
     Wire.write(REG_RAW_ANGLE_H);
