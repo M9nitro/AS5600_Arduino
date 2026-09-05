@@ -1,25 +1,34 @@
 #include "./AS5600.h"
 
+/*
+Debug to check if magnet is in potimal position.
+*/
 bool AS5600::magnetOk() {
     uint8_t s;
     if (!_readReg(REG_STATUS, s)) return false;          // no ACK = no sensor
     return (s & (1 << STATUS_MD_BIT)) && !(s & ((1 << STATUS_ML_BIT) | (1 << STATUS_MH_BIT)));
 }
 
+/*
+Shows magnet status
+*/
 uint8_t AS5600::magnetStatus() {
     uint8_t s;
     return _readReg(REG_STATUS, s) ? s : 0;
 }
 
-void AS5600::setCenter()            { AS5600::_center = AS5600::_angle;}
-void AS5600::setCenter(float rad)   { AS5600::_center = rad;}
-
+/*
+Connect Function Utility function.
+*/
 bool AS5600::_connect() {
     Wire.begin();
     Wire.setClock(100000);
     return true;
 }
 
+/*
+Check at the Begining Magnet Position.
+*/
 bool AS5600::_magnetCheck() {
     uint8_t s;
     if (!_readReg(REG_STATUS, s)) { Serial.println("Encoder not responding"); return false; }
@@ -38,15 +47,17 @@ bool AS5600::_magnetCheck() {
     return AS5600::_magnetPresent;
 }
 
-void AS5600::EncoderBegin(bool overide) {
+void AS5600::EncoderBegin(bool overide, float center) {
     AS5600::_connect();
    while (!AS5600::_magnetCheck() && !overide) {
             delay(100);
             Serial.println("Encoder Missing");
         }
-    AS5600::setFilter(SF_16X, FTH_OFF, HYST_3);   // 3 LSB hysteresis = 0.26 deg sensor deadband; anything less lets noise through as 0.4 rad/s spikes
-    AS5600::_readAngle(AS5600::_lastRaw);
-    AS5600::_lastTime = micros();
+    AS5600::setFilter(SF_16X, FTH_OFF, HYST_3); //Agressive Conf
+    AS5600::_readAngle(AS5600::_lastRaw);       //Read for Syncing up Update in the first GO.
+    AS5600::_center = center;                   // Using the Center Variable
+    AS5600::_cumulativeAngle = ((float)AS5600::_lastRaw/RAW_MAX)*TWO_PI_F - center; //Compensate for the center angle
+    AS5600::_lastTime = micros();               // Remember time for velocity.
    
 
 
@@ -78,21 +89,11 @@ bool AS5600::setFilter(SlowFilter sf, FastFilter fth, Hysteresis hyst) {
 }
 
 /*
-Read the Processed Angle. 
+Read the Processed Angle. With Hysteresis
 */
-
-
 bool AS5600::_readAngle(uint16_t &out) {
 
-    //Check if the magnet is correctly Placed
-    // Wire.beginTransmission((uint8_t)AS5600_ADDR);
-    // Wire.write(REG_STATUS);
-    // if (Wire.endTransmission(false) != 0) return false;
-    // if (Wire.requestFrom((uint8_t)AS5600_ADDR, 1) != 1) return false;
-    // uint8_t status = Wire.read();
-    //     if (!(status & (1 << STATUS_MD_BIT))) return false;
-    //     if (status & (1 << STATUS_ML_BIT)) return false;
-    //     if (status & (1 << STATUS_MH_BIT)) return false;
+    if (!AS5600::magnetOk) return false;
 
     Wire.beginTransmission((uint8_t)AS5600_ADDR);
     Wire.write(REG_ANGLE_H);
@@ -105,24 +106,14 @@ bool AS5600::_readAngle(uint16_t &out) {
     out = ((hi << 8) | lo )& 0x0FFF;
 
     return true;
-
 }
 
 /*
-Raw Angle for velocity/Accerlaration
+Raw Angle for angle/velocity/Accerlaration without hysteresis.
 */
-
 bool AS5600::_readRawAngle(uint16_t &out) {
 
-    //Check if the magnet is correctly Placed
-    // Wire.beginTransmission((uint8_t)AS5600_ADDR);
-    // Wire.write(REG_STATUS);
-    // if (Wire.endTransmission(false) != 0) return false;
-    // if (Wire.requestFrom((uint8_t)AS5600_ADDR, 1) != 1) return false;
-    // uint8_t status = Wire.read();
-    //     if (!(status & (1 << STATUS_MD_BIT))) return false;
-    //     if (status & (1 << STATUS_ML_BIT)) return false;
-    //     if (status & (1 << STATUS_MH_BIT)) return false;
+    if (!AS5600::magnetOk) return false; 
 
     Wire.beginTransmission((uint8_t)AS5600_ADDR);
     Wire.write(REG_RAW_ANGLE_H);
@@ -168,19 +159,20 @@ void AS5600::update() {
     AS5600::_lastRaw = raw;
 }
 
-float AS5600::getAngle() const { return AS5600::_angle; }
-float AS5600::getAngularVelocity() const { return AS5600::_velocity; }   // sensor shaft, rad/s
-float AS5600::getCumalativeAngle() const {return AS5600::_cumulativeAngle;}
-float  AS5600::getAngularAcceleration() const { return AS5600::_acceleration; }
+/*
+    Update Here necessary. 
+*/
+void AS5600::setCenter()  { AS5600::_center = AS5600::_angle;}
 
 // ---- steering: all relative to _center, scaled to the steering shaft ----
 float AS5600::getCenter() const { return AS5600::_center; }
 
-float AS5600::getSteeringAngle() const {
-    float d = AS5600::_angle - AS5600::_center;
-    if (d >  3.14159265f) d -= TWO_PI_F;   // wrap to +/-180 deg sensor = +/-60 deg steering,
-    if (d < -3.14159265f) d += TWO_PI_F;   // so the 4095->0 seam always sits opposite center
-    return DIRECTION * d / GEAR_RATIO;
-}
+float AS5600::getAngle() const { return AS5600::_angle; }                       //Absolute angle. 
+float AS5600::getCumalativeAngle() const {return AS5600::_cumulativeAngle;}     //CumlativeAngle
 
-float AS5600::getSteeringVelocity() const { return DIRECTION * AS5600::_velocity / GEAR_RATIO; }
+float AS5600::getSteeringAngle() const { return DIRECTION* AS5600::_cumulativeAngle / GEAR_RATIO;}  //Adjusted According to the Reduction ratio
+float AS5600::getSteeringVelocity() const { return DIRECTION * AS5600::_velocity / GEAR_RATIO; }    //Adjusted According to the Reduction ratio
+
+float AS5600::getAngularVelocity() const { return AS5600::_velocity; }          //Sensor shaft, rad/s
+float  AS5600::getAngularAcceleration() const { return AS5600::_acceleration; } //Acceleration, rad/s/s
+

@@ -28,13 +28,13 @@ enum Hysteresis : uint8_t { HYST_OFF = 0, HYST_1 = 1, HYST_2 = 2, HYST_3 = 3 };
 
 class AS5600 {
 public:
-    void EncoderBegin(bool overide = false);
+    void EncoderBegin(bool overide = false, float center = 0.0);
     void update();
 
     void setCenter();
-    void setCenter(float sensorRad);
-
     float getCenter() const ;
+
+
     float getSteeringAngle() const;
     float getSteeringVelocity() const; 
 
@@ -42,8 +42,10 @@ public:
     float getCumalativeAngle() const;
     float getAngularVelocity() const;
     float getAngularAcceleration() const;
+
     bool setFilter(SlowFilter sf, FastFilter fth, Hysteresis hyst);
     bool magnetOk();
+
     uint8_t magnetStatus();                 // raw STATUS reg: bit5 MD detected, bit4 ML too weak, bit3 MH too strong. 0 = no reply
 
 
@@ -54,18 +56,12 @@ private:
     uint16_t _lastRaw           = 0;
     uint32_t _lastTime          = 0;
 
-
     float    _center            = 0.0f;
     float    _cumulativeAngle   = 0.0f;
     float    _angle             = 0.0f;
     float    _velocity          = 0.0f;
     float    _lastVelocity      = 0.0f;
     float    _acceleration      = 0.0f;
- 
-    // float    _scaledAngle       = 0.0f;
-    // float    _lastScaledAngle   = 0.0f;
-    // float    _centerOffset      = 0.0f;
-    // int      _count             = 0;
 
     bool _connect();
     bool _magnetCheck();
